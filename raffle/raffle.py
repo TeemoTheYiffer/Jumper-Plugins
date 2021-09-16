@@ -4,6 +4,7 @@ import calendar
 import logging
 import random
 import time
+import re
 from datetime import datetime
 
 # Discord.py
@@ -161,8 +162,8 @@ class Raffle(commands.Cog):
                 raise ValueError
             raffles = list(r.items())
 
-        color = await self.bot.get_embed_color(ctx)
-        embed = self.embed_builder(raffles, color, title)
+            color = await self.bot.get_embed_color(ctx)
+            embed = self.embed_builder(raffles, color, title)
         msg = await ctx.send(embed=embed)
 
         def predicate(m):
@@ -335,7 +336,10 @@ class Raffle(commands.Cog):
         winners = await self._get_response(ctx, q2, predicate2)
         dos = 0
         roles = []
-
+        authorid = ctx.message.author.id
+        authornick = await self.bot.fetch_user(authorid)
+        await authornick.send("Please enter the reward (Steam Key/Humble Bundle Gift URL)? Type 'N/A' for Not Applicable.")
+        reward = await self.bot.wait_for('message', timeout=90, check=lambda message: message.author == authornick)
         resp = await self._get_response(ctx, q3, predicate3)
         if resp.lower() == "yes":
             dos = await self._get_response(ctx, "How many days on the server are required?", predicate4)
@@ -344,7 +348,7 @@ class Raffle(commands.Cog):
         if resp.lower() == "yes":
             roles = await self._get_roles(ctx)
 
-        return description, int(winners), int(dos), roles
+        return description, int(winners), int(dos), roles, reward.content
 
     async def raffle_worker(self):
         """Restarts raffle timers
@@ -404,6 +408,7 @@ class Raffle(commands.Cog):
         errored = False
         raffles = await self.config.guild(guild).Raffles.all()
         channel = self.bot.get_channel(raffles[str(message_id)]["Channel"])
+        reward = raffles[str(message_id)]["Reward"]
         if not channel:
             errored = True
         else:
@@ -420,7 +425,7 @@ class Raffle(commands.Cog):
                     errored = True
 
         if not errored:
-            await self.pick_winner(guild, channel, msg)
+            await self.pick_winner(guild, channel, msg, reward)
 
         async with self.config.guild(guild).Raffles() as r:
             try:
@@ -428,7 +433,7 @@ class Raffle(commands.Cog):
             except KeyError:
                 pass
 
-    async def pick_winner(self, guild, channel, msg):
+    async def pick_winner(self, guild, channel, msg, reward):
         reaction = next(filter(lambda x: x.emoji == "\U0001F39F", msg.reactions), None)
         if reaction is None:
             return await channel.send(
@@ -448,7 +453,13 @@ class Raffle(commands.Cog):
             )
         else:
             display = ", ".join(winner.mention for winner in winners)
-            await channel.send(f"Congratulations {display}! You have won the {msg.embeds[0].title} raffle!")
+            winnerid = re.search(r'(\d+)', display)
+            winnernick = await self.bot.fetch_user(winnerid[0])
+            await channel.send(f"Congratulations {display}! You have won the "
+                               f"{msg.embeds[0].title} raffle! "
+                               f"I have DMed you your reward!")
+            await winnernick.send(f"Here is your {msg.embeds[0].title} reward: {reward}")
+            await winnernick.send(f"Let {str(channel.guild.owner)} know if you run into any issues!")
 
     async def validate_entries(self, users, msg):
         try:
